@@ -4,28 +4,15 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.security.*;
-import java.util.Base64;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
 public class Blockchain {
-    public static int processNum = 0;
     public static int TOTALPROCESSES = 3;
     public static List<PublicKeyMsg> pkList = new LinkedList<>();
     public static KeyPair keyPair;
     public static int processID = 0;
     public static boolean processBegin = false;
-
-
-    public static KeyPair generateKeyPair(long seed) throws Exception {
-        KeyPairGenerator keyGenerator = KeyPairGenerator.getInstance("RSA");
-        SecureRandom rng = SecureRandom.getInstance("SHA1PRNG", "SUN");
-        rng.setSeed(seed);
-        keyGenerator.initialize(1024, rng);
-
-        return (keyGenerator.generateKeyPair());
-    }
+    public static List<BlockRecord> blockchain = new LinkedList<>();
 
     public PublicKeyMsg initPK(){
         byte[] bytePK = keyPair.getPublic().getEncoded();
@@ -57,6 +44,58 @@ public class Blockchain {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    public void initBlockchain(){
+        BlockRecord dummy = new BlockRecord();
+        dummy.setBlockID(UUID.randomUUID().toString());
+
+        Date date = new Date();
+        String T1 = String.format("%1$s %2$tF.%2$tT", "", date);
+        String TimeStampString = T1 + "." + processID + "\n";
+        dummy.setTimestamp(TimeStampString);
+
+        dummy.setBlockNum("0");
+        dummy.setFirstname("James");
+        dummy.setLastname("Bond");
+        dummy.setDateOfBirth("2021-10-19");
+        dummy.setSsNum("000-00-0000");
+        dummy.setDiagnose("fever");
+        dummy.setTreat("exercise");
+        dummy.setRx("food");
+        dummy.setPrevHash("1111111111");
+        dummy.setWinningHash(hashBlock(dummy));
+
+        blockchain.add(dummy);
+
+    }
+
+    public String hashBlock(BlockRecord block){
+        String SHA256String = "";
+        String blockStr = block.getBlockID() +
+                block.getFirstname() +
+                block.getLastname() +
+                block.getSsNum() +
+                block.getDateOfBirth() +
+                block.getDiagnose() +
+                block.getTreat() +
+                block.getRx();
+
+        try{
+            MessageDigest ourMD = MessageDigest.getInstance("SHA-256");
+            ourMD.update (blockStr.getBytes());
+            byte byteData[] = ourMD.digest();
+
+            StringBuffer sb = new StringBuffer();
+            for (int i = 0; i < byteData.length; i++) {
+                sb.append(Integer.toString((byteData[i] & 0xff) + 0x100, 16).substring(1));
+            }
+            SHA256String = sb.toString(); // For ease of looking at it, we'll save it as a string.
+        }catch(NoSuchAlgorithmException e){
+            e.printStackTrace();
+        };
+
+        return SHA256String;
     }
 
     public void run() {
@@ -98,21 +137,17 @@ public class Blockchain {
         }
 
         try{
-            KeyPair keyPair = generateKeyPair(999);
+            KeyPair keyPair = Utils.generateKeyPair(999);
         } catch (Exception e) {
             e.printStackTrace();
         }
 
         while(!processBegin){
-            try{
-                Thread.sleep(3000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+            Utils.wait(3000);
         }
 
         sendMultiPKs();
-
+        Utils.wait(3000);
 
 
     }
@@ -322,60 +357,129 @@ class BlockChainServerWorker extends Thread{
 }
 
 class BlockRecord{
-    String BlockID;
-    String VerificationProcessID;
-    String PreviousHash; // We'll copy from previous block
-    UUID uuid; // Just to show how JSON marshals this binary data.
-    String Fname;
-    String Lname;
-    String SSNum;
-    String DOB;
-    String Diag;
-    String Treat;
-    String Rx;
-    String RandomSeed; // Our guess. Ultimately our winning guess.
-    String WinningHash;
+    String blockID;
+    String blockNum;
+    String verificationProcessID;
+    String prevHash;
+    String winningHash;
+    String firstname;
+    String lastname;
+    String ssNum;
+    String dateOfBirth;
+    String timestamp;
+    String diagnose;
+    String treat;
+    String rx;
 
-    /* Examples of accessors for the BlockRecord fields: */
-    public String getBlockID() {return BlockID;}
-    public void setBlockID(String BID){this.BlockID = BID;}
+    public String getBlockID() {
+        return blockID;
+    }
 
-    public String getVerificationProcessID() {return VerificationProcessID;}
-    public void setVerificationProcessID(String VID){this.VerificationProcessID = VID;}
+    public void setBlockID(String blockID) {
+        this.blockID = blockID;
+    }
 
-    public String getPreviousHash() {return this.PreviousHash;}
-    public void setPreviousHash (String PH){this.PreviousHash = PH;}
+    public String getBlockNum() {
+        return blockNum;
+    }
 
-    public UUID getUUID() {return uuid;} // Later will show how JSON marshals as a string. Compare to BlockID.
-    public void setUUID (UUID ud){this.uuid = ud;}
+    public void setBlockNum(String blockNum) {
+        this.blockNum = blockNum;
+    }
 
-    public String getLname() {return Lname;}
-    public void setLname (String LN){this.Lname = LN;}
+    public String getVerificationProcessID() {
+        return verificationProcessID;
+    }
 
-    public String getFname() {return Fname;}
-    public void setFname (String FN){this.Fname = FN;}
+    public void setVerificationProcessID(String verificationProcessID) {
+        this.verificationProcessID = verificationProcessID;
+    }
 
-    public String getSSNum() {return SSNum;}
-    public void setSSNum (String SS){this.SSNum = SS;}
+    public String getPrevHash() {
+        return prevHash;
+    }
 
-    public String getDOB() {return DOB;}
-    public void setDOB (String RS){this.DOB = RS;}
+    public void setPrevHash(String prevHash) {
+        this.prevHash = prevHash;
+    }
 
-    public String getDiag() {return Diag;}
-    public void setDiag (String D){this.Diag = D;}
 
-    public String getTreat() {return Treat;}
-    public void setTreat (String Tr){this.Treat = Tr;}
+    public String getFirstname() {
+        return firstname;
+    }
 
-    public String getRx() {return Rx;}
-    public void setRx (String Rx){this.Rx = Rx;}
+    public void setFirstname(String firstname) {
+        this.firstname = firstname;
+    }
 
-    public String getRandomSeed() {return RandomSeed;}
-    public void setRandomSeed (String RS){this.RandomSeed = RS;}
+    public String getLastname() {
+        return lastname;
+    }
 
-    public String getWinningHash() {return WinningHash;}
-    public void setWinningHash (String WH){this.WinningHash = WH;}
+    public void setLastname(String lastname) {
+        this.lastname = lastname;
+    }
 
+    public String getSsNum() {
+        return ssNum;
+    }
+
+    public void setSsNum(String ssNum) {
+        this.ssNum = ssNum;
+    }
+
+    public String getDateOfBirth() {
+        return dateOfBirth;
+    }
+
+    public void setDateOfBirth(String dateOfBirth) {
+        this.dateOfBirth = dateOfBirth;
+    }
+
+    public String getTimestamp() {
+        return timestamp;
+    }
+
+    public void setTimestamp(String timestamp) {
+        this.timestamp = timestamp;
+    }
+
+    public String getDiagnose() {
+        return diagnose;
+    }
+
+    public void setDiagnose(String diagnose) {
+        this.diagnose = diagnose;
+    }
+
+    public String getTreat() {
+        return treat;
+    }
+
+    public void setTreat(String treat) {
+        this.treat = treat;
+    }
+
+    public String getRx() {
+        return rx;
+    }
+
+    public void setRx(String rx) {
+        this.rx = rx;
+    }
+
+    public String getWinningHash() {
+        return winningHash;
+    }
+
+    public void setWinningHash(String winningHash) {
+        this.winningHash = winningHash;
+    }
+
+    @Override
+    public String toString() {
+        return blockID + prevHash + firstname + lastname + ssNum + dateOfBirth + diagnose + treat + rx;
+    }
 }
 
 class PortGenerator{
@@ -394,5 +498,26 @@ class PortGenerator{
         pkServerPort = pkBaseServer + processID;
         ubServerPort = ubBaseServer + processID;
         bcServerPort = bcBaseServer + processID;
+    }
+}
+
+class Utils{
+    public static KeyPair generateKeyPair(long seed) throws Exception {
+        KeyPairGenerator keyGenerator = KeyPairGenerator.getInstance("RSA");
+        SecureRandom rng = SecureRandom.getInstance("SHA1PRNG", "SUN");
+        rng.setSeed(seed);
+        keyGenerator.initialize(1024, rng);
+
+        return (keyGenerator.generateKeyPair());
+    }
+
+
+    public static void wait(int milliseconds){
+        try{
+            Thread.sleep(milliseconds);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
     }
 }
