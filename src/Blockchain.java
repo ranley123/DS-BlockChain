@@ -1,13 +1,121 @@
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import com.google.gson.Gson;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.UnknownHostException;
+import java.security.*;
+import java.util.Base64;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.UUID;
-import java.security.PublicKey;
 
 public class Blockchain {
+    public static int processNum = 0;
+    public static int TOTALPROCESSES = 3;
+    public static List<PublicKeyMsg> pkList = new LinkedList<>();
+    public static KeyPair keyPair;
+    public static int processID = 0;
+    public static boolean processBegin = false;
+
+
+    public static KeyPair generateKeyPair(long seed) throws Exception {
+        KeyPairGenerator keyGenerator = KeyPairGenerator.getInstance("RSA");
+        SecureRandom rng = SecureRandom.getInstance("SHA1PRNG", "SUN");
+        rng.setSeed(seed);
+        keyGenerator.initialize(1024, rng);
+
+        return (keyGenerator.generateKeyPair());
+    }
+
+    public PublicKeyMsg initPK(){
+        byte[] bytePK = keyPair.getPublic().getEncoded();
+        String stringPK = Base64.getEncoder().encodeToString(bytePK);
+        PublicKeyMsg msg = new PublicKeyMsg(processID, stringPK);
+        return msg;
+    }
+
+    public void sendMultiPKs(){
+        // init this process's public key
+        PublicKeyMsg pkMsg = initPK();
+        Gson g = new Gson();
+
+        try{
+            for(int i = 0; i < TOTALPROCESSES; i++){
+                int curPort = PortGenerator.pkBaseServer + processID;
+                Socket socket = new Socket("localhost", curPort);
+                PrintWriter pw = new PrintWriter(socket.getOutputStream());
+                String msg = g.toJson(pkMsg);
+                pw.write(msg);
+                pw.flush();
+
+                socket.shutdownOutput();
+                pw.close();
+                socket.close();
+            }
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void run() {
+        Thread mainServer = new Thread(new MainServer(PortGenerator.mainServerPort));
+        Thread pkServer = new Thread(new PublicKeyServer(PortGenerator.pkServerPort));
+        Thread ubServer = new Thread(new UnverifiedBlockServer(PortGenerator.ubServerPort));
+        Thread bcServer = new Thread(new BlockChainServer(PortGenerator.bcServerPort));
+
+        mainServer.start();
+        pkServer.start();
+        ubServer.start();
+        bcServer.start();
+
+        try{
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        if(processID == 2){
+            try {
+                for (int i = 0; i < TOTALPROCESSES; i++) {
+                    int curServerPort = PortGenerator.mainBaseServer + processID;
+                    Socket socket = new Socket("localhost", curServerPort);
+                    PrintWriter pw = new PrintWriter(socket.getOutputStream());
+                    String msg = "ready";
+                    pw.write(msg);
+                    pw.flush();
+
+                    socket.shutdownOutput();
+                    pw.close();
+                    socket.close();
+                }
+            } catch (UnknownHostException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        try{
+            KeyPair keyPair = generateKeyPair(999);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        while(!processBegin){
+            try{
+                Thread.sleep(3000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        sendMultiPKs();
+
+
+
+    }
 
     public static void main(String[] args){
         int processID = 0;
@@ -22,36 +130,25 @@ public class Blockchain {
                     System.exit(0);
                 }
                 processID = tmp;
-                BlockchainWorker mainWorker = new BlockchainWorker(processID);
 
             }
             catch (Exception e){
                 e.printStackTrace();
             }
         }
-    }
 
-}
-
-class BlockchainWorker{
-    int processID = 0;
-
-    public BlockchainWorker(int processID){
-        this.processID = processID;
         PortGenerator.setPorts(processID);
-    }
-
-    public void run(){
-//        new Thread
+        Blockchain main = new Blockchain();
+        main.run();
     }
 
 }
 
-class PublicKeyServer implements Runnable{
+class MainServer implements Runnable{
     private ServerSocket serverSocket;
     private int port;
 
-    public PublicKeyServer(int port) throws IOException {
+    public MainServer(int port){
         this.port = port;
     }
 
@@ -62,7 +159,38 @@ class PublicKeyServer implements Runnable{
                 serverSocket = new ServerSocket(port);
                 Socket socket = serverSocket.accept();
 
+                DataInputStream input = new DataInputStream(socket.getInputStream());
+                BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+                String line = reader.readLine();
 
+                if(line.equals("ready"))
+                    Blockchain.processBegin = true;
+                socket.close();
+
+            }
+            catch (IOException e){
+                e.printStackTrace();
+            }
+        }
+    }
+}
+
+class PublicKeyServer implements Runnable{
+    private ServerSocket serverSocket;
+    private int port;
+
+    public PublicKeyServer(int port){
+        this.port = port;
+    }
+
+    @Override
+    public void run() {
+        while(true){
+            try{
+                serverSocket = new ServerSocket(port);
+                Socket socket = serverSocket.accept();
+
+                new PublicKeyServerWorker(socket).start();
             }
             catch (IOException e){
                 e.printStackTrace();
@@ -78,11 +206,16 @@ class PublicKeyServerWorker extends Thread{
         this.socket = socket;
     }
 
+    @Override
     public void run(){
         try{
-            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            Gson g = new Gson();
+            DataInputStream input = new DataInputStream(socket.getInputStream());
+            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
             String line = reader.readLine();
 
+            PublicKeyMsg publicKeyMsg = g.fromJson(line, PublicKeyMsg.class);
+            Blockchain.pkList.add(publicKeyMsg);
 
         } catch (IOException e) {
             e.printStackTrace();
@@ -93,6 +226,11 @@ class PublicKeyServerWorker extends Thread{
 class PublicKeyMsg{
     private int processID;
     private String publicKey;
+
+    public PublicKeyMsg(int processID, String publicKey){
+        this.processID = processID;
+        this.publicKey = publicKey;
+    }
 
     public int getProcessID() {
         return processID;
@@ -111,6 +249,77 @@ class PublicKeyMsg{
     }
 }
 
+class UnverifiedBlockServer implements Runnable{
+    private ServerSocket serverSocket;
+    private int port;
+
+    public UnverifiedBlockServer(int port){
+        this.port = port;
+    }
+
+    @Override
+    public void run() {
+        while(true){
+            try{
+                serverSocket = new ServerSocket(port);
+                Socket socket = serverSocket.accept();
+
+                new UnverifiedBlockServerWorker(socket).start();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+
+class UnverifiedBlockServerWorker extends Thread{
+    Socket socket;
+
+    public UnverifiedBlockServerWorker(Socket socket){
+        this.socket = socket;
+    }
+
+    @Override
+    public void run(){
+
+    }
+}
+
+class BlockChainServer implements Runnable{
+    private ServerSocket serverSocket;
+    private int port;
+
+    public BlockChainServer(int port){
+        this.port = port;
+    }
+
+    @Override
+    public void run() {
+        while(true){
+            try{
+                serverSocket = new ServerSocket(port);
+                Socket socket = serverSocket.accept();
+
+                new BlockChainServerWorker(socket).start();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+
+class BlockChainServerWorker extends Thread{
+    Socket socket = null;
+
+    public BlockChainServerWorker(Socket socket){
+        this.socket = socket;
+    }
+
+    @Override
+    public void run(){
+
+    }
+}
 
 class BlockRecord{
     String BlockID;
