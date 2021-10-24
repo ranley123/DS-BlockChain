@@ -106,21 +106,4 @@ public class Utils{
         return list;
     }
 
-    static class BRComparator implements Comparator<BlockRecord> {
-        @Override
-        public int compare(BlockRecord blockRecord1, BlockRecord blockRecord2) {
-            String date1 = blockRecord1.getTimestamp();
-            String date2 = blockRecord2.getTimestamp();
-            if (date1.equals(date2)) {
-                return 0;
-            }
-            if (date1 == null) {
-                return -1;
-            }
-            if (date2 == null) {
-                return 1;
-            }
-            return date1.compareTo(date2);
-        }
-    }
 }

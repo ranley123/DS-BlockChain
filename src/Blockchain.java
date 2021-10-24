@@ -7,6 +7,7 @@ import java.net.Socket;
 import java.net.UnknownHostException;
 import java.security.*;
 import java.util.*;
+import java.util.concurrent.PriorityBlockingQueue;
 
 public class Blockchain {
     public static int TOTALPROCESSES = 3;
@@ -16,7 +17,26 @@ public class Blockchain {
     public static int processID = 0;
     public static boolean processBegin = false;
     public static List<BlockRecord> blockchain = new LinkedList<>();
-    public static PriorityQueue<BlockRecord> unverifiedBlockQueue = new PriorityQueue<>(new Utils.BRComparator());
+    public static Comparator<BlockRecord> comparator = new Comparator<BlockRecord>() {
+        @Override
+        public int compare(BlockRecord blockRecord1, BlockRecord blockRecord2) {
+            String date1 = blockRecord1.getTimestamp();
+            String date2 = blockRecord2.getTimestamp();
+            if (date1.equals(date2)) {
+                return 0;
+            }
+            if (date1 == null) {
+                return -1;
+            }
+            if (date2 == null) {
+                return 1;
+            }
+            return date1.compareTo(date2);
+        }
+    };
+    public static PriorityBlockingQueue<BlockRecord> unverifiedBlockQueue = new PriorityBlockingQueue<>(11, comparator);
+
+
 
     public PublicKeyMsg initPK(){
         byte[] bytePK = keyPair.getPublic().getEncoded();
@@ -142,7 +162,6 @@ public class Blockchain {
         Thread pkServer = new Thread(new PublicKeyServer(Utils.pkBaseServer + processID));
         Thread ubServer = new Thread(new UnverifiedBlockServer(Utils.ubBaseServer + processID));
         Thread bcServer = new Thread(new UpdatedBlockChainServer(Utils.bcBaseServer + processID));
-
 
         mainServer.start();
         pkServer.start();
