@@ -1,4 +1,6 @@
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -10,6 +12,7 @@ public class Blockchain {
     public static int TOTALPROCESSES = 3;
     public static List<PublicKeyMsg> pkList = new LinkedList<>();
     public static KeyPair keyPair;
+    public static PrivateKey privteKey;
     public static int processID = 0;
     public static boolean processBegin = false;
     public static List<BlockRecord> blockchain = new LinkedList<>();
@@ -21,14 +24,14 @@ public class Blockchain {
         return msg;
     }
 
-    public void sendMultiPKs(){
+    public void multicastPKs(){
         // init this process's public key
         PublicKeyMsg pkMsg = initPK();
         Gson g = new Gson();
 
         try{
             for(int i = 0; i < TOTALPROCESSES; i++){
-                int curPort = PortGenerator.pkBaseServer + processID;
+                int curPort = Utils.pkBaseServer + i;
                 Socket socket = new Socket("localhost", curPort);
                 PrintWriter pw = new PrintWriter(socket.getOutputStream());
                 String msg = g.toJson(pkMsg);
@@ -55,7 +58,6 @@ public class Blockchain {
         String TimeStampString = T1 + "." + processID + "\n";
         dummy.setTimestamp(TimeStampString);
 
-        dummy.setBlockNum("0");
         dummy.setFirstname("James");
         dummy.setLastname("Bond");
         dummy.setDateOfBirth("2021-10-19");
@@ -68,6 +70,32 @@ public class Blockchain {
 
         blockchain.add(dummy);
 
+        multicastBlock(dummy, true);
+
+    }
+
+    public void multicastBlock(BlockRecord block, boolean isVerified){
+        Gson g = new Gson();
+        int baseServer = isVerified? Utils.bcBaseServer: Utils.ubBaseServer;
+        try{
+            for(int i = 0; i < TOTALPROCESSES; i++){
+                int curPort = baseServer + i;
+                Socket socket = new Socket("localhost", curPort);
+                PrintWriter pw = new PrintWriter(socket.getOutputStream());
+
+                String msg = g.toJson(block);
+                pw.write(msg);
+                pw.flush();
+
+                socket.shutdownOutput();
+                pw.close();
+                socket.close();
+            }
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public String hashBlock(BlockRecord block){
@@ -98,11 +126,20 @@ public class Blockchain {
         return SHA256String;
     }
 
+    public static boolean hasDuplicateBlock(BlockRecord block){
+        for(BlockRecord b: blockchain){
+            if(b.getBlockID().equals(block.getBlockID()))
+                return true;
+        }
+        return false;
+    }
+
     public void run() {
-        Thread mainServer = new Thread(new MainServer(PortGenerator.mainServerPort));
-        Thread pkServer = new Thread(new PublicKeyServer(PortGenerator.pkServerPort));
-        Thread ubServer = new Thread(new UnverifiedBlockServer(PortGenerator.ubServerPort));
-        Thread bcServer = new Thread(new BlockChainServer(PortGenerator.bcServerPort));
+        Thread mainServer = new Thread(new MainServer());
+        Thread pkServer = new Thread(new PublicKeyServer(Utils.pkBaseServer + processID));
+        Thread ubServer = new Thread(new UnverifiedBlockServer(Utils.ubBaseServer + processID));
+        Thread bcServer = new Thread(new UpdatedBlockChainServer(Utils.bcBaseServer + processID));
+
 
         mainServer.start();
         pkServer.start();
@@ -110,20 +147,25 @@ public class Blockchain {
         bcServer.start();
 
         try{
-            Thread.sleep(3000);
+            Thread.sleep(1000);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
 
+        System.out.println("starts process: " + processID);
         if(processID == 2){
+            System.out.println("Sending starts signal...");
+            processBegin = true;
             try {
-                for (int i = 0; i < TOTALPROCESSES; i++) {
-                    int curServerPort = PortGenerator.mainBaseServer + processID;
+                for (int i = 0; i < 1; i++) {
+                    int curServerPort = Utils.mainBaseServer + i;
                     Socket socket = new Socket("localhost", curServerPort);
                     PrintWriter pw = new PrintWriter(socket.getOutputStream());
                     String msg = "ready";
                     pw.write(msg);
                     pw.flush();
+
+                    System.out.println("sent ready to port: " + curServerPort);
 
                     socket.shutdownOutput();
                     pw.close();
@@ -137,23 +179,36 @@ public class Blockchain {
         }
 
         try{
-            KeyPair keyPair = Utils.generateKeyPair(999);
+            keyPair = Utils.generateKeyPair(999);
+            privteKey = keyPair.getPrivate();
+
         } catch (Exception e) {
             e.printStackTrace();
         }
 
         while(!processBegin){
-            Utils.wait(3000);
+            Utils.wait(1000);
+        }
+        System.out.println("Process Begins...");
+        System.out.println("Sending out Public Keys...");
+        multicastPKs();
+        Utils.wait(1000);
+
+        for(int i = 0; i < pkList.size(); i++){
+            System.out.println(pkList.get(i));
         }
 
-        sendMultiPKs();
-        Utils.wait(3000);
+        System.out.println("Init Block Chain...");
+
+        if(processID == 0)
+            initBlockchain();
+
+
 
 
     }
 
     public static void main(String[] args){
-        int processID = 0;
 
         if(args.length < 1)
             processID = 0;
@@ -172,7 +227,9 @@ public class Blockchain {
             }
         }
 
-        PortGenerator.setPorts(processID);
+//        System.out.println(processID);
+
+        Utils.setPorts(processID);
         Blockchain main = new Blockchain();
         main.run();
     }
@@ -180,344 +237,51 @@ public class Blockchain {
 }
 
 class MainServer implements Runnable{
-    private ServerSocket serverSocket;
-    private int port;
-
-    public MainServer(int port){
-        this.port = port;
-    }
-
-    @Override
     public void run() {
-        while(true){
-            try{
-                serverSocket = new ServerSocket(port);
-                Socket socket = serverSocket.accept();
-
-                DataInputStream input = new DataInputStream(socket.getInputStream());
-                BufferedReader reader = new BufferedReader(new InputStreamReader(input));
-                String line = reader.readLine();
-
-                if(line.equals("ready"))
-                    Blockchain.processBegin = true;
-                socket.close();
-
+        // defined queue length
+        int queueLength = 6;
+        // declaring socket variable
+        Socket socket;
+        // displaying message on the terminal stating start of main server
+        System.out.println("Main server started at: " + Utils.mainServerPort);
+        try {
+            // assigning serverSocket object - its port number and queue length
+            ServerSocket serverSocket = new ServerSocket(Utils.mainServerPort, queueLength);
+            while (true) {
+                // accepting request
+                socket = serverSocket.accept();
+                // spawning a new worker thread and invokes worker class run()
+                new MainServerWorker(socket).start();
             }
-            catch (IOException e){
-                e.printStackTrace();
-            }
+        } catch (IOException ioException) {
+            // exception handling
+            ioException.printStackTrace();
         }
     }
 }
 
-class PublicKeyServer implements Runnable{
-    private ServerSocket serverSocket;
-    private int port;
-
-    public PublicKeyServer(int port){
-        this.port = port;
-    }
-
-    @Override
-    public void run() {
-        while(true){
-            try{
-                serverSocket = new ServerSocket(port);
-                Socket socket = serverSocket.accept();
-
-                new PublicKeyServerWorker(socket).start();
-            }
-            catch (IOException e){
-                e.printStackTrace();
-            }
-        }
-    }
-}
-
-class PublicKeyServerWorker extends Thread{
+class MainServerWorker extends Thread {
+    // declaring socket variable
     Socket socket;
 
-    public PublicKeyServerWorker(Socket socket){
+    // constructor declaration - assigning socket to locally defined socket variable
+    public MainServerWorker(Socket socket) {
         this.socket = socket;
     }
 
-    @Override
-    public void run(){
-        try{
-            Gson g = new Gson();
-            DataInputStream input = new DataInputStream(socket.getInputStream());
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
-            String line = reader.readLine();
-
-            PublicKeyMsg publicKeyMsg = g.fromJson(line, PublicKeyMsg.class);
-            Blockchain.pkList.add(publicKeyMsg);
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-}
-
-class PublicKeyMsg{
-    private int processID;
-    private String publicKey;
-
-    public PublicKeyMsg(int processID, String publicKey){
-        this.processID = processID;
-        this.publicKey = publicKey;
-    }
-
-    public int getProcessID() {
-        return processID;
-    }
-
-    public void setProcessID(int processID) {
-        this.processID = processID;
-    }
-
-    public String getPublicKey() {
-        return publicKey;
-    }
-
-    public void setPublicKey(String publicKey) {
-        this.publicKey = publicKey;
-    }
-}
-
-class UnverifiedBlockServer implements Runnable{
-    private ServerSocket serverSocket;
-    private int port;
-
-    public UnverifiedBlockServer(int port){
-        this.port = port;
-    }
-
-    @Override
+    // run() method
     public void run() {
-        while(true){
-            try{
-                serverSocket = new ServerSocket(port);
-                Socket socket = serverSocket.accept();
-
-                new UnverifiedBlockServerWorker(socket).start();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+        try {
+            BufferedReader inputData = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            String dataRead = inputData.readLine();
+            Blockchain.processBegin = true;
+            // closes the socket connection
+            socket.close();
+        } catch (IOException ioException) {
+            // exception handling
+            ioException.printStackTrace();
         }
     }
 }
 
-class UnverifiedBlockServerWorker extends Thread{
-    Socket socket;
 
-    public UnverifiedBlockServerWorker(Socket socket){
-        this.socket = socket;
-    }
-
-    @Override
-    public void run(){
-
-    }
-}
-
-class BlockChainServer implements Runnable{
-    private ServerSocket serverSocket;
-    private int port;
-
-    public BlockChainServer(int port){
-        this.port = port;
-    }
-
-    @Override
-    public void run() {
-        while(true){
-            try{
-                serverSocket = new ServerSocket(port);
-                Socket socket = serverSocket.accept();
-
-                new BlockChainServerWorker(socket).start();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-    }
-}
-
-class BlockChainServerWorker extends Thread{
-    Socket socket = null;
-
-    public BlockChainServerWorker(Socket socket){
-        this.socket = socket;
-    }
-
-    @Override
-    public void run(){
-
-    }
-}
-
-class BlockRecord{
-    String blockID;
-    String blockNum;
-    String verificationProcessID;
-    String prevHash;
-    String winningHash;
-    String firstname;
-    String lastname;
-    String ssNum;
-    String dateOfBirth;
-    String timestamp;
-    String diagnose;
-    String treat;
-    String rx;
-
-    public String getBlockID() {
-        return blockID;
-    }
-
-    public void setBlockID(String blockID) {
-        this.blockID = blockID;
-    }
-
-    public String getBlockNum() {
-        return blockNum;
-    }
-
-    public void setBlockNum(String blockNum) {
-        this.blockNum = blockNum;
-    }
-
-    public String getVerificationProcessID() {
-        return verificationProcessID;
-    }
-
-    public void setVerificationProcessID(String verificationProcessID) {
-        this.verificationProcessID = verificationProcessID;
-    }
-
-    public String getPrevHash() {
-        return prevHash;
-    }
-
-    public void setPrevHash(String prevHash) {
-        this.prevHash = prevHash;
-    }
-
-
-    public String getFirstname() {
-        return firstname;
-    }
-
-    public void setFirstname(String firstname) {
-        this.firstname = firstname;
-    }
-
-    public String getLastname() {
-        return lastname;
-    }
-
-    public void setLastname(String lastname) {
-        this.lastname = lastname;
-    }
-
-    public String getSsNum() {
-        return ssNum;
-    }
-
-    public void setSsNum(String ssNum) {
-        this.ssNum = ssNum;
-    }
-
-    public String getDateOfBirth() {
-        return dateOfBirth;
-    }
-
-    public void setDateOfBirth(String dateOfBirth) {
-        this.dateOfBirth = dateOfBirth;
-    }
-
-    public String getTimestamp() {
-        return timestamp;
-    }
-
-    public void setTimestamp(String timestamp) {
-        this.timestamp = timestamp;
-    }
-
-    public String getDiagnose() {
-        return diagnose;
-    }
-
-    public void setDiagnose(String diagnose) {
-        this.diagnose = diagnose;
-    }
-
-    public String getTreat() {
-        return treat;
-    }
-
-    public void setTreat(String treat) {
-        this.treat = treat;
-    }
-
-    public String getRx() {
-        return rx;
-    }
-
-    public void setRx(String rx) {
-        this.rx = rx;
-    }
-
-    public String getWinningHash() {
-        return winningHash;
-    }
-
-    public void setWinningHash(String winningHash) {
-        this.winningHash = winningHash;
-    }
-
-    @Override
-    public String toString() {
-        return blockID + prevHash + firstname + lastname + ssNum + dateOfBirth + diagnose + treat + rx;
-    }
-}
-
-class PortGenerator{
-    public static int mainBaseServer = 4600;
-    public static int pkBaseServer = 4710;
-    public static int ubBaseServer = 4820;
-    public static int bcBaseServer = 4930;
-
-    public static int mainServerPort = 0;
-    public static int pkServerPort = 0;
-    public static int ubServerPort = 0;
-    public static int bcServerPort = 0;
-
-    public static void setPorts(int processID){
-        mainServerPort = mainBaseServer + processID;
-        pkServerPort = pkBaseServer + processID;
-        ubServerPort = ubBaseServer + processID;
-        bcServerPort = bcBaseServer + processID;
-    }
-}
-
-class Utils{
-    public static KeyPair generateKeyPair(long seed) throws Exception {
-        KeyPairGenerator keyGenerator = KeyPairGenerator.getInstance("RSA");
-        SecureRandom rng = SecureRandom.getInstance("SHA1PRNG", "SUN");
-        rng.setSeed(seed);
-        keyGenerator.initialize(1024, rng);
-
-        return (keyGenerator.generateKeyPair());
-    }
-
-
-    public static void wait(int milliseconds){
-        try{
-            Thread.sleep(milliseconds);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-    }
-}
