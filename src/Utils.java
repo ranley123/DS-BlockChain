@@ -65,7 +65,7 @@ public class Utils{
         return (signer.sign());
     }
 
-    public static List<BlockRecord> readFile(String filename) throws Exception {
+    public static List<BlockRecord> readFile(String filename) {
         List<BlockRecord> list = new LinkedList<>();
         try{
             BufferedReader reader = new BufferedReader(new FileReader(filename));
@@ -106,7 +106,7 @@ public class Utils{
         return list;
     }
 
-    class BRComparator implements Comparator<BlockRecord> {
+    static class BRComparator implements Comparator<BlockRecord> {
         @Override
         public int compare(BlockRecord blockRecord1, BlockRecord blockRecord2) {
             String date1 = blockRecord1.getTimestamp();

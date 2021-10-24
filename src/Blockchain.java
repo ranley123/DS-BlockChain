@@ -16,6 +16,7 @@ public class Blockchain {
     public static int processID = 0;
     public static boolean processBegin = false;
     public static List<BlockRecord> blockchain = new LinkedList<>();
+    public static PriorityQueue<BlockRecord> unverifiedBlockQueue = new PriorityQueue<>(new Utils.BRComparator());
 
     public PublicKeyMsg initPK(){
         byte[] bytePK = keyPair.getPublic().getEncoded();
@@ -97,6 +98,8 @@ public class Blockchain {
             e.printStackTrace();
         }
     }
+
+
 
     public String hashBlock(BlockRecord block){
         String SHA256String = "";
@@ -203,7 +206,12 @@ public class Blockchain {
         if(processID == 0)
             initBlockchain();
 
-
+        String filename = String.format("BlockInput%d.txt", processID);
+        List<BlockRecord> ubList = Utils.readFile(filename);
+        for(BlockRecord block: ubList){
+            multicastBlock(block, false);
+        }
+        Utils.wait(1000);
 
 
     }
